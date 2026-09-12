@@ -4,123 +4,313 @@ from unittest.mock import Mock, patch
 from core.agent import Agent
 from tools.registry import get_tool, get_tools
 from tools.terminal import classify_command
+from tools.git import git_status
 
 
 class TestTerminalSafety(unittest.TestCase):
+
     def test_safe_command_is_classified_safe(self):
-        self.assertEqual(classify_command("pwd"), "SAFE")
+        self.assertEqual(
+            classify_command("pwd"),
+            "SAFE",
+        )
 
     def test_blocked_command_is_classified_block(self):
-        self.assertEqual(classify_command("sudo reboot"), "BLOCK")
+        self.assertEqual(
+            classify_command("sudo reboot"),
+            "BLOCK",
+        )
 
     def test_shell_chaining_requires_confirmation(self):
-        self.assertEqual(classify_command("pwd && whoami"), "CONFIRM")
+        self.assertEqual(
+            classify_command("pwd && whoami"),
+            "CONFIRM",
+        )
 
     def test_pipe_requires_confirmation(self):
-        self.assertEqual(classify_command("ls | grep test"), "CONFIRM")
+        self.assertEqual(
+            classify_command("ls | grep test"),
+            "CONFIRM",
+        )
 
     def test_redirection_requires_confirmation(self):
-        self.assertEqual(classify_command("echo test > file.txt"), "CONFIRM")
+        self.assertEqual(
+            classify_command("echo test > file.txt"),
+            "CONFIRM",
+        )
 
     def test_empty_command_is_blocked(self):
-        self.assertEqual(classify_command(""), "BLOCK")
+        self.assertEqual(
+            classify_command(""),
+            "BLOCK",
+        )
 
     def test_malformed_command_is_blocked(self):
-        self.assertEqual(classify_command("echo 'unterminated"), "BLOCK")
+        self.assertEqual(
+            classify_command("echo 'unterminated"),
+            "BLOCK",
+        )
 
 
 class TestToolRegistry(unittest.TestCase):
+
     def test_get_known_tool(self):
-        tool = get_tool("list_directory")
+        tool = get_tool(
+            "list_directory"
+        )
 
         self.assertIsNotNone(tool)
-        self.assertEqual(tool.name, "list_directory")
+
+        self.assertEqual(
+            tool.name,
+            "list_directory",
+        )
 
     def test_get_unknown_tool(self):
-        self.assertIsNone(get_tool("does_not_exist"))
+        self.assertIsNone(
+            get_tool(
+                "does_not_exist"
+            )
+        )
 
     def test_anthropic_tool_schema(self):
         tools = get_tools()
-        names = {tool["name"] for tool in tools}
 
-        self.assertIn("list_directory", names)
-        self.assertIn("read_file", names)
-        self.assertIn("search_files", names)
-        self.assertIn("run_terminal", names)
-        self.assertIn("add_memory", names)
+        names = {
+            tool["name"]
+            for tool in tools
+        }
+
+        self.assertIn(
+            "list_directory",
+            names,
+        )
+
+        self.assertIn(
+            "read_file",
+            names,
+        )
+
+        self.assertIn(
+            "search_files",
+            names,
+        )
+
+        self.assertIn(
+            "git_status",
+            names,
+        )
+
+        self.assertIn(
+            "run_terminal",
+            names,
+        )
+
+        self.assertIn(
+            "add_memory",
+            names,
+        )
 
         for tool in tools:
-            self.assertIn("name", tool)
-            self.assertIn("description", tool)
-            self.assertIn("input_schema", tool)
+
+            self.assertIn(
+                "name",
+                tool,
+            )
+
+            self.assertIn(
+                "description",
+                tool,
+            )
+
+            self.assertIn(
+                "input_schema",
+                tool,
+            )
+
+    def test_git_status_is_registered(self):
+        tool = get_tool(
+            "git_status"
+        )
+
+        self.assertIsNotNone(
+            tool
+        )
+
+        self.assertEqual(
+            tool.name,
+            "git_status",
+        )
+
+        self.assertEqual(
+            tool.risk,
+            "READ",
+        )
+
+        self.assertFalse(
+            tool.requires_confirmation
+        )
+
+
+class TestGitStatus(unittest.TestCase):
+
+    def test_current_project_is_git_repository(self):
+        result = git_status(
+            "."
+        )
+
+        self.assertIn(
+            "Git repository: YES",
+            result,
+        )
+
+    def test_non_repository_directory(self):
+
+        with patch(
+            "tools.git.subprocess.run"
+        ) as mock_run:
+
+            mock_run.return_value = Mock(
+                returncode=128,
+                stdout="",
+                stderr=(
+                    "fatal: not a git repository"
+                ),
+            )
+
+            result = git_status(
+                "/tmp"
+            )
+
+        self.assertIn(
+            "Git repository: NO",
+            result,
+        )
+
+    def test_missing_directory(self):
+        result = git_status(
+            "/this/path/should/not/exist"
+        )
+
+        self.assertIn(
+            "Directory does not exist",
+            result,
+        )
 
 
 class TestAgentPermissions(unittest.TestCase):
+
     def setUp(self):
         self.agent = Agent()
 
-    @patch("core.agent.input", return_value="y")
-    def test_confirmation_allows_action(self, mock_input):
+    @patch(
+        "core.agent.input",
+        return_value="y",
+    )
+    def test_confirmation_allows_action(
+        self,
+        mock_input,
+    ):
         tool_spec = Mock()
+
         tool_spec.name = "test_tool"
         tool_spec.risk = "EXECUTE"
 
         self.assertTrue(
             self.agent._confirm_tool(
                 tool_spec,
-                {"value": "test"},
+                {
+                    "value": "test"
+                },
             )
         )
 
         mock_input.assert_called_once()
 
-    @patch("core.agent.input", return_value="n")
-    def test_confirmation_denies_action(self, mock_input):
+    @patch(
+        "core.agent.input",
+        return_value="n",
+    )
+    def test_confirmation_denies_action(
+        self,
+        mock_input,
+    ):
         tool_spec = Mock()
+
         tool_spec.name = "test_tool"
         tool_spec.risk = "EXECUTE"
 
         self.assertFalse(
             self.agent._confirm_tool(
                 tool_spec,
-                {"value": "test"},
+                {
+                    "value": "test"
+                },
             )
         )
 
         mock_input.assert_called_once()
 
-    @patch("core.agent.input", return_value="")
-    def test_confirmation_defaults_to_denied(self, mock_input):
+    @patch(
+        "core.agent.input",
+        return_value="",
+    )
+    def test_confirmation_defaults_to_denied(
+        self,
+        mock_input,
+    ):
         tool_spec = Mock()
+
         tool_spec.name = "test_tool"
         tool_spec.risk = "EXECUTE"
 
         self.assertFalse(
             self.agent._confirm_tool(
                 tool_spec,
-                {"value": "test"},
+                {
+                    "value": "test"
+                },
             )
         )
+
+        mock_input.assert_called_once()
 
 
 class TestAgentToolExecution(unittest.TestCase):
+
     def setUp(self):
         self.agent = Agent()
 
-    def test_unknown_tool_returns_error(self):
+    @patch("core.agent.get_tool")
+    def test_unknown_tool_returns_error(
+        self,
+        mock_get_tool,
+    ):
+        mock_get_tool.return_value = None
+
         tool_use = Mock()
+
         tool_use.name = "unknown_tool"
         tool_use.input = {}
 
-        result = self.agent._execute_tool(tool_use)
+        result = self.agent._execute_tool(
+            tool_use
+        )
 
-        self.assertIn("Unknown tool", result)
+        self.assertIn(
+            "Unknown tool",
+            result,
+        )
 
     @patch("core.agent.get_tool")
-    def test_denied_tool_is_not_executed(self, mock_get_tool):
-        function = Mock(return_value="executed")
+    def test_denied_tool_is_not_executed(
+        self,
+        mock_get_tool,
+    ):
+        function = Mock()
 
         tool_spec = Mock()
+
         tool_spec.name = "test_tool"
         tool_spec.risk = "EXECUTE"
         tool_spec.requires_confirmation = True
@@ -129,20 +319,40 @@ class TestAgentToolExecution(unittest.TestCase):
         mock_get_tool.return_value = tool_spec
 
         tool_use = Mock()
+
         tool_use.name = "test_tool"
-        tool_use.input = {"value": "test"}
+        tool_use.input = {
+            "value": "test"
+        }
 
-        with patch.object(self.agent, "_confirm_tool", return_value=False):
-            result = self.agent._execute_tool(tool_use)
+        with patch.object(
+            self.agent,
+            "_confirm_tool",
+            return_value=False,
+        ):
 
-        self.assertEqual(result, "Action denied by the user.")
+            result = self.agent._execute_tool(
+                tool_use
+            )
+
+        self.assertEqual(
+            result,
+            "Action denied by the user.",
+        )
+
         function.assert_not_called()
 
     @patch("core.agent.get_tool")
-    def test_approved_tool_is_executed(self, mock_get_tool):
-        function = Mock(return_value="success")
+    def test_approved_tool_is_executed(
+        self,
+        mock_get_tool,
+    ):
+        function = Mock(
+            return_value="success"
+        )
 
         tool_spec = Mock()
+
         tool_spec.name = "test_tool"
         tool_spec.risk = "EXECUTE"
         tool_spec.requires_confirmation = True
@@ -151,14 +361,67 @@ class TestAgentToolExecution(unittest.TestCase):
         mock_get_tool.return_value = tool_spec
 
         tool_use = Mock()
+
         tool_use.name = "test_tool"
-        tool_use.input = {"value": "test"}
+        tool_use.input = {
+            "value": "test"
+        }
 
-        with patch.object(self.agent, "_confirm_tool", return_value=True):
-            result = self.agent._execute_tool(tool_use)
+        with patch.object(
+            self.agent,
+            "_confirm_tool",
+            return_value=True,
+        ):
 
-        self.assertEqual(result, "success")
-        function.assert_called_once_with(value="test")
+            result = self.agent._execute_tool(
+                tool_use
+            )
+
+        self.assertEqual(
+            result,
+            "success",
+        )
+
+        function.assert_called_once_with(
+            value="test"
+        )
+
+    @patch("core.agent.get_tool")
+    def test_tool_argument_error_is_reported(
+        self,
+        mock_get_tool,
+    ):
+        function = Mock(
+            side_effect=TypeError(
+                "bad argument"
+            )
+        )
+
+        tool_spec = Mock()
+
+        tool_spec.name = "test_tool"
+        tool_spec.risk = "EXECUTE"
+        tool_spec.requires_confirmation = False
+        tool_spec.function = function
+
+        mock_get_tool.return_value = tool_spec
+
+        tool_use = Mock()
+
+        tool_use.name = "test_tool"
+        tool_use.input = {
+            "value": "test"
+        }
+
+        result = self.agent._execute_tool(
+            tool_use
+        )
+
+        self.assertIn(
+            "Tool argument error",
+            result,
+        )
+
     @patch("core.agent.get_tool")
     @patch("core.agent.classify_command")
     def test_safe_terminal_command_skips_confirmation(
@@ -167,10 +430,14 @@ class TestAgentToolExecution(unittest.TestCase):
         mock_get_tool,
     ):
         function = Mock(
-            return_value="Exit code: 0\n\nSTDOUT:\n/home/ranpo"
+            return_value=(
+                "Exit code: 0\n\n"
+                "STDOUT:\n/home/ranpo"
+            )
         )
 
         tool_spec = Mock()
+
         tool_spec.name = "run_terminal"
         tool_spec.risk = "EXECUTE"
         tool_spec.requires_confirmation = True
@@ -180,6 +447,7 @@ class TestAgentToolExecution(unittest.TestCase):
         mock_classify.return_value = "SAFE"
 
         tool_use = Mock()
+
         tool_use.name = "run_terminal"
         tool_use.input = {
             "command": "pwd"
@@ -217,6 +485,7 @@ class TestAgentToolExecution(unittest.TestCase):
         )
 
         tool_spec = Mock()
+
         tool_spec.name = "run_terminal"
         tool_spec.risk = "EXECUTE"
         tool_spec.requires_confirmation = True
@@ -226,6 +495,7 @@ class TestAgentToolExecution(unittest.TestCase):
         mock_classify.return_value = "CONFIRM"
 
         tool_use = Mock()
+
         tool_use.name = "run_terminal"
         tool_use.input = {
             "command": "echo hello"
@@ -267,6 +537,7 @@ class TestAgentToolExecution(unittest.TestCase):
         function = Mock()
 
         tool_spec = Mock()
+
         tool_spec.name = "run_terminal"
         tool_spec.risk = "EXECUTE"
         tool_spec.requires_confirmation = True
@@ -276,6 +547,7 @@ class TestAgentToolExecution(unittest.TestCase):
         mock_classify.return_value = "BLOCK"
 
         tool_use = Mock()
+
         tool_use.name = "run_terminal"
         tool_use.input = {
             "command": "sudo reboot"
@@ -291,6 +563,7 @@ class TestAgentToolExecution(unittest.TestCase):
             )
 
         mock_confirm.assert_not_called()
+
         function.assert_not_called()
 
         self.assertIn(
@@ -308,6 +581,7 @@ class TestAgentToolExecution(unittest.TestCase):
         function = Mock()
 
         tool_spec = Mock()
+
         tool_spec.name = "run_terminal"
         tool_spec.risk = "EXECUTE"
         tool_spec.requires_confirmation = True
@@ -317,6 +591,7 @@ class TestAgentToolExecution(unittest.TestCase):
         mock_classify.return_value = "CONFIRM"
 
         tool_use = Mock()
+
         tool_use.name = "run_terminal"
         tool_use.input = {
             "command": "echo hello"
@@ -340,26 +615,10 @@ class TestAgentToolExecution(unittest.TestCase):
             result,
             "Action denied by the user.",
         )
-    @patch("core.agent.get_tool")
-    def test_tool_argument_error_is_reported(self, mock_get_tool):
-        function = Mock(side_effect=TypeError("bad argument"))
 
-        tool_spec = Mock()
-        tool_spec.name = "test_tool"
-        tool_spec.risk = "EXECUTE"
-        tool_spec.requires_confirmation = False
-        tool_spec.function = function
 
-        mock_get_tool.return_value = tool_spec
-
-        tool_use = Mock()
-        tool_use.name = "test_tool"
-        tool_use.input = {"value": "test"}
-
-        result = self.agent._execute_tool(tool_use)
-
-        self.assertIn("Tool argument error", result)
 class TestAgentWorkflow(unittest.TestCase):
+
     def setUp(self):
         self.agent = Agent()
 
@@ -369,6 +628,7 @@ class TestAgentWorkflow(unittest.TestCase):
         mock_chat,
     ):
         final_response = Mock()
+
         final_response.content = [
             Mock(
                 type="text",
@@ -397,6 +657,7 @@ class TestAgentWorkflow(unittest.TestCase):
         tool_response = Mock()
 
         tool_use = Mock()
+
         tool_use.type = "tool_use"
         tool_use.name = "list_directory"
         tool_use.id = "tool-use-id"
@@ -427,6 +688,7 @@ class TestAgentWorkflow(unittest.TestCase):
             mock_chat.call_count,
             10,
         )
+
 
 if __name__ == "__main__":
     unittest.main()

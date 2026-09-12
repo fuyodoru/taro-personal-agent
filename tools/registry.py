@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Callable
-
+from tools.git import git_status
 
 from tools.terminal import run_terminal
 
@@ -90,7 +90,27 @@ TOOLS = {
         risk="READ",
         requires_confirmation=False,
     ),
+    # =========================
+    # GIT
+    # =========================
 
+    "git_status": ToolSpec(
+        name="git_status",
+        function=git_status,
+        description="Check whether a directory is a Git repository and report its current branch.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Directory to inspect. Defaults to the user's home directory.",
+                },
+            },
+            "required": [],
+        },
+        risk="READ",
+        requires_confirmation=False,
+    ),
     # =========================
     # TERMINAL
     # =========================
