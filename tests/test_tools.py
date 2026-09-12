@@ -159,7 +159,187 @@ class TestAgentToolExecution(unittest.TestCase):
 
         self.assertEqual(result, "success")
         function.assert_called_once_with(value="test")
+    @patch("core.agent.get_tool")
+    @patch("core.agent.classify_command")
+    def test_safe_terminal_command_skips_confirmation(
+        self,
+        mock_classify,
+        mock_get_tool,
+    ):
+        function = Mock(
+            return_value="Exit code: 0\n\nSTDOUT:\n/home/ranpo"
+        )
 
+        tool_spec = Mock()
+        tool_spec.name = "run_terminal"
+        tool_spec.risk = "EXECUTE"
+        tool_spec.requires_confirmation = True
+        tool_spec.function = function
+
+        mock_get_tool.return_value = tool_spec
+        mock_classify.return_value = "SAFE"
+
+        tool_use = Mock()
+        tool_use.name = "run_terminal"
+        tool_use.input = {
+            "command": "pwd"
+        }
+
+        with patch.object(
+            self.agent,
+            "_confirm_tool",
+        ) as mock_confirm:
+
+            result = self.agent._execute_tool(
+                tool_use
+            )
+
+        mock_confirm.assert_not_called()
+
+        function.assert_called_once_with(
+            command="pwd"
+        )
+
+        self.assertIn(
+            "Exit code: 0",
+            result,
+        )
+
+    @patch("core.agent.get_tool")
+    @patch("core.agent.classify_command")
+    def test_confirm_terminal_command_requires_approval(
+        self,
+        mock_classify,
+        mock_get_tool,
+    ):
+        function = Mock(
+            return_value="Exit code: 0"
+        )
+
+        tool_spec = Mock()
+        tool_spec.name = "run_terminal"
+        tool_spec.risk = "EXECUTE"
+        tool_spec.requires_confirmation = True
+        tool_spec.function = function
+
+        mock_get_tool.return_value = tool_spec
+        mock_classify.return_value = "CONFIRM"
+
+        tool_use = Mock()
+        tool_use.name = "run_terminal"
+        tool_use.input = {
+            "command": "echo hello"
+        }
+
+        with patch.object(
+            self.agent,
+            "_confirm_tool",
+            return_value=True,
+        ) as mock_confirm:
+
+            result = self.agent._execute_tool(
+                tool_use
+            )
+
+        mock_confirm.assert_called_once_with(
+            tool_spec,
+            {
+                "command": "echo hello"
+            },
+        )
+
+        function.assert_called_once_with(
+            command="echo hello"
+        )
+
+        self.assertEqual(
+            result,
+            "Exit code: 0",
+        )
+
+    @patch("core.agent.get_tool")
+    @patch("core.agent.classify_command")
+    def test_blocked_terminal_command_is_rejected(
+        self,
+        mock_classify,
+        mock_get_tool,
+    ):
+        function = Mock()
+
+        tool_spec = Mock()
+        tool_spec.name = "run_terminal"
+        tool_spec.risk = "EXECUTE"
+        tool_spec.requires_confirmation = True
+        tool_spec.function = function
+
+        mock_get_tool.return_value = tool_spec
+        mock_classify.return_value = "BLOCK"
+
+        tool_use = Mock()
+        tool_use.name = "run_terminal"
+        tool_use.input = {
+            "command": "sudo reboot"
+        }
+
+        with patch.object(
+            self.agent,
+            "_confirm_tool",
+        ) as mock_confirm:
+
+            result = self.agent._execute_tool(
+                tool_use
+            )
+
+        mock_confirm.assert_not_called()
+        function.assert_not_called()
+
+        self.assertIn(
+            "BLOCKED",
+            result,
+        )
+
+    @patch("core.agent.get_tool")
+    @patch("core.agent.classify_command")
+    def test_denied_terminal_command_is_not_executed(
+        self,
+        mock_classify,
+        mock_get_tool,
+    ):
+        function = Mock()
+
+        tool_spec = Mock()
+        tool_spec.name = "run_terminal"
+        tool_spec.risk = "EXECUTE"
+        tool_spec.requires_confirmation = True
+        tool_spec.function = function
+
+        mock_get_tool.return_value = tool_spec
+        mock_classify.return_value = "CONFIRM"
+
+        tool_use = Mock()
+        tool_use.name = "run_terminal"
+        tool_use.input = {
+            "command": "echo hello"
+        }
+
+        with patch.object(
+            self.agent,
+            "_confirm_tool",
+            return_value=False,
+        ) as mock_confirm:
+
+            result = self.agent._execute_tool(
+                tool_use
+            )
+
+        mock_confirm.assert_called_once()
+
+        function.assert_not_called()
+
+        self.assertEqual(
+            result,
+            "Action denied by the user.",
+        )
     @patch("core.agent.get_tool")
     def test_tool_argument_error_is_reported(self, mock_get_tool):
         function = Mock(side_effect=TypeError("bad argument"))

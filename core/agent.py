@@ -2,6 +2,7 @@ import time
 
 from brain.llm import chat_with_model
 from tools.registry import get_tools, get_tool
+from tools.terminal import classify_command
 
 from memory.memory import search_memories
 
@@ -161,7 +162,7 @@ class Agent:
         self,
         tool_spec,
         arguments,
-    ):
+    ) -> bool:
 
         print(
             "\n" + "=" * 50
@@ -206,6 +207,16 @@ class Agent:
     ) -> str:
         """
         Execute an Anthropic tool_use content block.
+
+        Terminal tools use command-level safety
+        classification:
+
+            SAFE    -> execute automatically
+            CONFIRM -> ask the user
+            BLOCK   -> never execute
+
+        Other tools use their ToolSpec permission
+        configuration.
         """
 
         tool_name = (
@@ -228,11 +239,57 @@ class Agent:
                 f"'{tool_name}'."
             )
 
+        # =====================================================
+        # DETERMINE PERMISSION REQUIREMENT
+        # =====================================================
+
+        requires_confirmation = (
+            tool_spec.requires_confirmation
+        )
+
         # -----------------------------------------------------
-        # CONFIRMATION
+        # TERMINAL SAFETY CLASSIFICATION
         # -----------------------------------------------------
 
-        if tool_spec.requires_confirmation:
+        if tool_name == "run_terminal":
+
+            command = arguments.get(
+                "command",
+                "",
+            )
+
+            classification = classify_command(
+                command
+            )
+
+            print(
+                f"[Safety] Terminal command "
+                f"classification: {classification}"
+            )
+
+            # BLOCK
+            if classification == "BLOCK":
+
+                return (
+                    "BLOCKED: This command is considered "
+                    "too dangerous for Tarō to execute."
+                )
+
+            # SAFE
+            elif classification == "SAFE":
+
+                requires_confirmation = False
+
+            # CONFIRM
+            elif classification == "CONFIRM":
+
+                requires_confirmation = True
+
+        # =====================================================
+        # USER CONFIRMATION
+        # =====================================================
+
+        if requires_confirmation:
 
             allowed = self._confirm_tool(
                 tool_spec,
@@ -245,9 +302,9 @@ class Agent:
                     "Action denied by the user."
                 )
 
-        # -----------------------------------------------------
-        # EXECUTE
-        # -----------------------------------------------------
+        # =====================================================
+        # EXECUTE TOOL
+        # =====================================================
 
         try:
 
@@ -311,18 +368,18 @@ class Agent:
                 response_language=language,
             )
 
-            # -------------------------------------------------
-            # Convert Anthropic content blocks to dictionaries.
-            # -------------------------------------------------
+            # =================================================
+            # CONVERT ANTHROPIC CONTENT BLOCKS
+            # =================================================
 
             assistant_content = [
                 block.model_dump()
                 for block in response.content
             ]
 
-            # -------------------------------------------------
-            # Find all tool_use blocks.
-            # -------------------------------------------------
+            # =================================================
+            # FIND TOOL USE BLOCKS
+            # =================================================
 
             tool_use_blocks = [
                 block
