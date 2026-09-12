@@ -8,6 +8,13 @@ from memory.memory import search_memories
 from language import detect_language
 
 
+# =========================================================
+# AGENT CONFIGURATION
+# =========================================================
+
+MAX_TOOL_ITERATIONS = 10
+
+
 class Agent:
 
     def __init__(self):
@@ -17,15 +24,30 @@ class Agent:
     # LANGUAGE
     # =========================================================
 
-    def _detect_language(self, user_input: str) -> str:
+    def _detect_language(
+        self,
+        user_input: str,
+    ) -> str:
+
         start = time.perf_counter()
 
-        language = detect_language(user_input)
+        language = detect_language(
+            user_input
+        )
 
-        elapsed = time.perf_counter() - start
+        elapsed = (
+            time.perf_counter()
+            - start
+        )
 
-        print(f"[Language] {language}")
-        print(f"[Timing] Language: {elapsed:.3f}s")
+        print(
+            f"[Language] {language}"
+        )
+
+        print(
+            f"[Timing] Language: "
+            f"{elapsed:.3f}s"
+        )
 
         return language
 
@@ -44,7 +66,10 @@ class Agent:
         seen = set()
 
         try:
-            matches = search_memories(user_input)
+
+            matches = search_memories(
+                user_input
+            )
 
             for memory in matches:
 
@@ -53,23 +78,43 @@ class Agent:
                     "",
                 )
 
-                if content and content not in seen:
-                    results.append(memory)
-                    seen.add(content)
+                if (
+                    content
+                    and content not in seen
+                ):
+
+                    results.append(
+                        memory
+                    )
+
+                    seen.add(
+                        content
+                    )
 
         except Exception as error:
 
             print(
                 f"[Memory] Search error: "
-                f"{type(error).__name__}: {error}"
+                f"{type(error).__name__}: "
+                f"{error}"
             )
 
         results = results[:5]
 
-        elapsed = time.perf_counter() - start
+        elapsed = (
+            time.perf_counter()
+            - start
+        )
 
-        print(f"[Memory] Results: {len(results)}")
-        print(f"[Timing] Memory: {elapsed:.3f}s")
+        print(
+            f"[Memory] Results: "
+            f"{len(results)}"
+        )
+
+        print(
+            f"[Timing] Memory: "
+            f"{elapsed:.3f}s"
+        )
 
         return results
 
@@ -104,7 +149,9 @@ class Agent:
                     f"- [{category}] {content}"
                 )
 
-        return "\n".join(lines)
+        return "\n".join(
+            lines
+        )
 
     # =========================================================
     # TOOL PERMISSION
@@ -116,9 +163,17 @@ class Agent:
         arguments,
     ):
 
-        print("\n" + "=" * 50)
-        print("Tarō Permission Request")
-        print("=" * 50)
+        print(
+            "\n" + "=" * 50
+        )
+
+        print(
+            "Tarō Permission Request"
+        )
+
+        print(
+            "=" * 50
+        )
 
         print(
             f"Tool: {tool_spec.name}"
@@ -153,7 +208,9 @@ class Agent:
         Execute an Anthropic tool_use content block.
         """
 
-        tool_name = tool_use_block.name
+        tool_name = (
+            tool_use_block.name
+        )
 
         arguments = (
             tool_use_block.input
@@ -198,21 +255,172 @@ class Agent:
                 **arguments
             )
 
-            return str(result)
+            return str(
+                result
+            )
 
         except TypeError as error:
 
             return (
-                f"Tool argument error for "
-                f"'{tool_name}': {error}"
+                f"Tool argument error "
+                f"for '{tool_name}': "
+                f"{error}"
             )
 
         except Exception as error:
 
             return (
                 f"Tool execution error: "
-                f"{type(error).__name__}: {error}"
+                f"{type(error).__name__}: "
+                f"{error}"
             )
+
+    # =========================================================
+    # CLAUDE / TOOL LOOP
+    # =========================================================
+
+    def _run_claude_loop(
+        self,
+        language: str,
+    ) -> str:
+        """
+        Run Claude until it produces a final text response.
+
+        Claude may request multiple tools. Tool results are
+        returned to Claude and the loop continues until Claude
+        produces a normal text response.
+
+        The workflow is bounded by MAX_TOOL_ITERATIONS to
+        prevent unbounded tool execution.
+        """
+
+        for iteration in range(
+            1,
+            MAX_TOOL_ITERATIONS + 1,
+        ):
+
+            print(
+                f"\n[Agent] Workflow step "
+                f"{iteration}/"
+                f"{MAX_TOOL_ITERATIONS}"
+            )
+
+            response = chat_with_model(
+                self.messages,
+                get_tools(),
+                response_language=language,
+            )
+
+            # -------------------------------------------------
+            # Convert Anthropic content blocks to dictionaries.
+            # -------------------------------------------------
+
+            assistant_content = [
+                block.model_dump()
+                for block in response.content
+            ]
+
+            # -------------------------------------------------
+            # Find all tool_use blocks.
+            # -------------------------------------------------
+
+            tool_use_blocks = [
+                block
+                for block in response.content
+                if block.type == "tool_use"
+            ]
+
+            # =================================================
+            # TOOL USE
+            # =================================================
+
+            if tool_use_blocks:
+
+                # Store Claude's complete assistant message.
+                self.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": assistant_content,
+                    }
+                )
+
+                tool_results = []
+
+                for tool_use in tool_use_blocks:
+
+                    result = self._execute_tool(
+                        tool_use
+                    )
+
+                    print(
+                        f"\n[Tool result: "
+                        f"{tool_use.name}]"
+                    )
+
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_use.id,
+                            "content": result,
+                        }
+                    )
+
+                # -------------------------------------------------
+                # Anthropic requires tool_result blocks inside
+                # a user message.
+                # -------------------------------------------------
+
+                self.messages.append(
+                    {
+                        "role": "user",
+                        "content": tool_results,
+                    }
+                )
+
+                # Claude receives the tool results and decides
+                # whether another tool is required.
+                continue
+
+            # =================================================
+            # FINAL TEXT RESPONSE
+            # =================================================
+
+            text_blocks = [
+                block.text
+                for block in response.content
+                if block.type == "text"
+            ]
+
+            answer = (
+                "\n".join(
+                    text_blocks
+                ).strip()
+            )
+
+            # Store Claude's final response.
+            self.messages.append(
+                {
+                    "role": "assistant",
+                    "content": assistant_content,
+                }
+            )
+
+            print(
+                f"\n[Agent] Workflow completed "
+                f"in {iteration} step(s)."
+            )
+
+            return answer
+
+        # =====================================================
+        # WORKFLOW LIMIT
+        # =====================================================
+
+        return (
+            "The task reached Tarō's maximum "
+            "workflow step limit before Claude "
+            "produced a final response."
+        )
 
     # =========================================================
     # MAIN LOOP
@@ -220,8 +428,13 @@ class Agent:
 
     def run(self):
 
-        print("Tarō is online.")
-        print("Type 'exit' or 'quit' to stop.")
+        print(
+            "Tarō is online."
+        )
+
+        print(
+            "Type 'exit' or 'quit' to stop."
+        )
 
         while True:
 
@@ -260,8 +473,10 @@ class Agent:
             # LANGUAGE
             # =================================================
 
-            language = self._detect_language(
-                user_input
+            language = (
+                self._detect_language(
+                    user_input
+                )
             )
 
             # =================================================
@@ -287,7 +502,8 @@ class Agent:
             parts = []
 
             parts.append(
-                f"Response language: {language}"
+                f"Response language: "
+                f"{language}"
             )
 
             if memory_context:
@@ -318,123 +534,22 @@ class Agent:
 
             try:
 
-                while True:
-
-                    response = chat_with_model(
-                        self.messages,
-                        get_tools(),
-                        response_language=language,
+                answer = (
+                    self._run_claude_loop(
+                        language
                     )
+                )
 
-                    # -------------------------------------------------
-                    # Convert Anthropic content blocks to dictionaries.
-                    #
-                    # This preserves:
-                    # - text
-                    # - tool_use
-                    # - tool_use id
-                    # - tool input
-                    # -------------------------------------------------
-
-                    assistant_content = [
-                        block.model_dump()
-                        for block in response.content
-                    ]
-
-                    # -------------------------------------------------
-                    # Find all tool_use blocks.
-                    # -------------------------------------------------
-
-                    tool_use_blocks = [
-                        block
-                        for block in response.content
-                        if block.type == "tool_use"
-                    ]
-
-                    # =================================================
-                    # TOOL USE
-                    # =================================================
-
-                    if tool_use_blocks:
-
-                        # Store Claude's complete assistant message.
-                        self.messages.append(
-                            {
-                                "role": "assistant",
-                                "content": assistant_content,
-                            }
-                        )
-
-                        tool_results = []
-
-                        for tool_use in tool_use_blocks:
-
-                            result = self._execute_tool(
-                                tool_use
-                            )
-
-                            print(
-                                f"\n[Tool result: "
-                                f"{tool_use.name}]"
-                            )
-
-                            tool_results.append(
-                                {
-                                    "type": "tool_result",
-                                    "tool_use_id": tool_use.id,
-                                    "content": result,
-                                }
-                            )
-
-                        # -------------------------------------------------
-                        # Anthropic requires tool_result blocks inside
-                        # a user message.
-                        # -------------------------------------------------
-
-                        self.messages.append(
-                            {
-                                "role": "user",
-                                "content": tool_results,
-                            }
-                        )
-
-                        # Send the tool results back to Claude.
-                        continue
-
-                    # =================================================
-                    # NORMAL TEXT RESPONSE
-                    # =================================================
-
-                    text_blocks = [
-                        block.text
-                        for block in response.content
-                        if block.type == "text"
-                    ]
-
-                    answer = (
-                        "\n".join(text_blocks)
-                        .strip()
-                    )
-
-                    print(
-                        f"Tarō: {answer}"
-                    )
-
-                    # Store Claude's response in the conversation.
-                    self.messages.append(
-                        {
-                            "role": "assistant",
-                            "content": assistant_content,
-                        }
-                    )
-
-                    break
+                print(
+                    f"Tarō: {answer}"
+                )
 
             except Exception as error:
 
                 print(
                     "Tarō: Something went wrong: "
-                    f"{type(error).__name__}: {error}"
+                    f"{type(error).__name__}: "
+                    f"{error}"
                 )
 
 

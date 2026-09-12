@@ -179,7 +179,74 @@ class TestAgentToolExecution(unittest.TestCase):
         result = self.agent._execute_tool(tool_use)
 
         self.assertIn("Tool argument error", result)
+class TestAgentWorkflow(unittest.TestCase):
+    def setUp(self):
+        self.agent = Agent()
 
+    @patch("core.agent.chat_with_model")
+    def test_workflow_returns_final_response(
+        self,
+        mock_chat,
+    ):
+        final_response = Mock()
+        final_response.content = [
+            Mock(
+                type="text",
+                text="Task completed.",
+            )
+        ]
+
+        mock_chat.return_value = final_response
+
+        result = self.agent._run_claude_loop(
+            "English"
+        )
+
+        self.assertEqual(
+            result,
+            "Task completed.",
+        )
+
+        mock_chat.assert_called_once()
+
+    @patch("core.agent.chat_with_model")
+    def test_workflow_respects_iteration_limit(
+        self,
+        mock_chat,
+    ):
+        tool_response = Mock()
+
+        tool_use = Mock()
+        tool_use.type = "tool_use"
+        tool_use.name = "list_directory"
+        tool_use.id = "tool-use-id"
+        tool_use.input = {}
+
+        tool_response.content = [
+            tool_use
+        ]
+
+        mock_chat.return_value = tool_response
+
+        with patch.object(
+            self.agent,
+            "_execute_tool",
+            return_value="tool result",
+        ):
+
+            result = self.agent._run_claude_loop(
+                "English"
+            )
+
+        self.assertIn(
+            "maximum workflow step limit",
+            result,
+        )
+
+        self.assertEqual(
+            mock_chat.call_count,
+            10,
+        )
 
 if __name__ == "__main__":
     unittest.main()
