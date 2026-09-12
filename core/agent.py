@@ -1,3 +1,4 @@
+import json
 import time
 
 from brain.llm import chat_with_model
@@ -15,11 +16,20 @@ from language import detect_language
 
 MAX_TOOL_ITERATIONS = 10
 
+CACHEABLE_RISKS = {
+    "READ",
+    "MEMORY_READ",
+}
+
 
 class Agent:
 
     def __init__(self):
         self.messages = []
+
+        # Tool cache lives only for the current
+        # Agent workflow / user request.
+        self.tool_cache = {}
 
     # =========================================================
     # LANGUAGE
@@ -155,6 +165,33 @@ class Agent:
         )
 
     # =========================================================
+    # TOOL CACHE
+    # =========================================================
+
+    def _build_tool_cache_key(
+        self,
+        tool_name: str,
+        arguments: dict,
+    ) -> str:
+        """
+        Build a deterministic cache key for a tool call.
+
+        Arguments are serialized with sorted keys so that
+        equivalent dictionaries produce the same key.
+        """
+
+        normalized_arguments = json.dumps(
+            arguments,
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+
+        return (
+            f"{tool_name}:"
+            f"{normalized_arguments}"
+        )
+
+    # =========================================================
     # TOOL PERMISSION
     # =========================================================
 
@@ -215,8 +252,8 @@ class Agent:
             CONFIRM -> ask the user
             BLOCK   -> never execute
 
-        Other tools use their ToolSpec permission
-        configuration.
+        Cacheable read-only tools can reuse results
+        within the current workflow.
         """
 
         tool_name = (
@@ -240,6 +277,29 @@ class Agent:
             )
 
         # =====================================================
+        # TOOL CACHE
+        # =====================================================
+
+        cache_key = self._build_tool_cache_key(
+            tool_name,
+            arguments,
+        )
+
+        if (
+            tool_spec.risk in CACHEABLE_RISKS
+            and cache_key in self.tool_cache
+        ):
+
+            print(
+                f"[Tool cache] HIT: "
+                f"{tool_name}"
+            )
+
+            return self.tool_cache[
+                cache_key
+            ]
+
+        # =====================================================
         # DETERMINE PERMISSION REQUIREMENT
         # =====================================================
 
@@ -247,9 +307,9 @@ class Agent:
             tool_spec.requires_confirmation
         )
 
-        # -----------------------------------------------------
+        # =====================================================
         # TERMINAL SAFETY CLASSIFICATION
-        # -----------------------------------------------------
+        # =====================================================
 
         if tool_name == "run_terminal":
 
@@ -267,7 +327,10 @@ class Agent:
                 f"classification: {classification}"
             )
 
+            # -------------------------------------------------
             # BLOCK
+            # -------------------------------------------------
+
             if classification == "BLOCK":
 
                 return (
@@ -275,12 +338,18 @@ class Agent:
                     "too dangerous for Tarō to execute."
                 )
 
+            # -------------------------------------------------
             # SAFE
+            # -------------------------------------------------
+
             elif classification == "SAFE":
 
                 requires_confirmation = False
 
+            # -------------------------------------------------
             # CONFIRM
+            # -------------------------------------------------
+
             elif classification == "CONFIRM":
 
                 requires_confirmation = True
@@ -312,9 +381,26 @@ class Agent:
                 **arguments
             )
 
-            return str(
+            result = str(
                 result
             )
+
+            # -------------------------------------------------
+            # STORE CACHE RESULT
+            # -------------------------------------------------
+
+            if tool_spec.risk in CACHEABLE_RISKS:
+
+                self.tool_cache[
+                    cache_key
+                ] = result
+
+                print(
+                    f"[Tool cache] STORE: "
+                    f"{tool_name}"
+                )
+
+            return result
 
         except TypeError as error:
 
@@ -525,6 +611,12 @@ class Agent:
                 )
 
                 break
+
+            # =================================================
+            # RESET WORKFLOW CACHE
+            # =================================================
+
+            self.tool_cache.clear()
 
             # =================================================
             # LANGUAGE

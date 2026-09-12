@@ -688,7 +688,103 @@ class TestAgentWorkflow(unittest.TestCase):
             mock_chat.call_count,
             10,
         )
+    @patch("core.agent.get_tool")
+    def test_read_tool_result_is_cached(
+        self,
+        mock_get_tool,
+    ):
+        function = Mock(
+            return_value="cached result"
+        )
 
+        tool_spec = Mock()
+
+        tool_spec.name = "git_status"
+        tool_spec.risk = "READ"
+        tool_spec.requires_confirmation = False
+        tool_spec.function = function
+
+        mock_get_tool.return_value = tool_spec
+
+        tool_use = Mock()
+
+        tool_use.name = "git_status"
+        tool_use.input = {
+            "path": "/home/ranpo/taro"
+        }
+
+        first_result = self.agent._execute_tool(
+            tool_use
+        )
+
+        second_result = self.agent._execute_tool(
+            tool_use
+        )
+
+        self.assertEqual(
+            first_result,
+            "cached result",
+        )
+
+        self.assertEqual(
+            second_result,
+            "cached result",
+        )
+
+        function.assert_called_once_with(
+            path="/home/ranpo/taro"
+        )
+
+    @patch("core.agent.get_tool")
+    def test_execute_tool_is_not_cached(
+        self,
+        mock_get_tool,
+    ):
+        function = Mock(
+            side_effect=[
+                "first result",
+                "second result",
+            ]
+        )
+
+        tool_spec = Mock()
+
+        tool_spec.name = "test_tool"
+        tool_spec.risk = "EXECUTE"
+        tool_spec.requires_confirmation = False
+        tool_spec.function = function
+
+        mock_get_tool.return_value = tool_spec
+
+        tool_use = Mock()
+
+        tool_use.name = "test_tool"
+        tool_use.input = {
+            "value": "test"
+        }
+
+        first_result = self.agent._execute_tool(
+            tool_use
+        )
+
+        second_result = self.agent._execute_tool(
+            tool_use
+        )
+
+        self.assertEqual(
+            first_result,
+            "first result",
+        )
+
+        self.assertEqual(
+            second_result,
+            "second result",
+        )
+
+        self.assertEqual(
+            function.call_count,
+            2,
+        )
 
 if __name__ == "__main__":
     unittest.main()
